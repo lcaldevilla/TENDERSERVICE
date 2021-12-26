@@ -17,6 +17,6 @@ $router->get('/', function () use ($router) {
     return $router->app->version(); // indica la versiona ctual
 });
 
-$router->get('/tenders', 'TenderController@store'); // se encarga de parsear el fichero atom
+$router->post('/tenders', 'TenderController@store'); // se encarga de parsear el fichero atom
 
-$router->post('/parsers', 'ParserController@store'); // crea un nuevo concurso
+//$router->post('/parsers', 'ParserController@store'); // crea un nuevo concurso

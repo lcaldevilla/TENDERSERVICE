@@ -39,6 +39,6 @@ class TenderController extends Controller
         }
 
          return response()->json(['created' => true], 201);
-        ]);
+        
     }
 }
