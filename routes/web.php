@@ -18,5 +18,11 @@ $router->get('/', function () use ($router) {
 });
 
 $router->post('/tenders', 'TenderController@store'); // se encarga de parsear el fichero atom
+$router->get('/tenders', 'TenderController@getTenders');
+$router->get('/tender', 'TenderController@tender');
+/*$router->group(['namespace' => 'api', 'prefix'=>'api/v1'], function ($router)
+{
+    $router->get('/v1/tenders', 'TenderController@getTenders');
+});*/
 
-//$router->post('/parsers', 'ParserController@store'); // crea un nuevo concurso
+

@@ -2,7 +2,6 @@
 
 namespace MongoDB\Tests\Operation;
 
-use ArrayIterator;
 use MongoDB\Collection;
 use MongoDB\Driver\BulkWrite;
 use MongoDB\Driver\Exception\RuntimeException;
@@ -14,10 +13,27 @@ use stdClass;
 
 use function current;
 use function iterator_to_array;
-use function version_compare;
 
 class AggregateFunctionalTest extends FunctionalTestCase
 {
+    public function testAllowDiskUseIsOmittedByDefault(): void
+    {
+        (new CommandObserver())->observe(
+            function (): void {
+                $operation = new Aggregate(
+                    $this->getDatabaseName(),
+                    $this->getCollectionName(),
+                    [['$match' => ['x' => 1]]]
+                );
+
+                $operation->execute($this->getPrimaryServer());
+            },
+            function (array $event): void {
+                $this->assertObjectNotHasAttribute('allowDiskUse', $event['started']->getCommand());
+            }
+        );
+    }
+
     public function testBatchSizeIsIgnoredIfPipelineIncludesOutStage(): void
     {
         (new CommandObserver())->observe(
@@ -42,10 +58,6 @@ class AggregateFunctionalTest extends FunctionalTestCase
 
     public function testCurrentOpCommand(): void
     {
-        if (version_compare($this->getServerVersion(), '3.6.0', '<')) {
-            $this->markTestSkipped('$currentOp is not supported');
-        }
-
         (new CommandObserver())->observe(
             function (): void {
                 $operation = new Aggregate(
@@ -128,10 +140,6 @@ class AggregateFunctionalTest extends FunctionalTestCase
 
     public function testSessionOption(): void
     {
-        if (version_compare($this->getServerVersion(), '3.6.0', '<')) {
-            $this->markTestSkipped('Sessions are not supported');
-        }
-
         (new CommandObserver())->observe(
             function (): void {
                 $operation = new Aggregate(
@@ -152,7 +160,7 @@ class AggregateFunctionalTest extends FunctionalTestCase
     /**
      * @dataProvider provideTypeMapOptionsAndExpectedDocuments
      */
-    public function testTypeMapOption(?array $typeMap = null, array $expectedDocuments): void
+    public function testTypeMapOption(?array $typeMap, array $expectedDocuments): void
     {
         $this->createFixtures(3);
 
@@ -162,26 +170,6 @@ class AggregateFunctionalTest extends FunctionalTestCase
         $results = iterator_to_array($operation->execute($this->getPrimaryServer()));
 
         $this->assertEquals($expectedDocuments, $results);
-    }
-
-    /**
-     * @dataProvider provideTypeMapOptionsAndExpectedDocuments
-     */
-    public function testTypeMapOptionWithoutCursor(?array $typeMap = null, array $expectedDocuments): void
-    {
-        if (version_compare($this->getServerVersion(), '3.6.0', '>=')) {
-            $this->markTestSkipped('Aggregations with useCursor == false are not supported');
-        }
-
-        $this->createFixtures(3);
-
-        $pipeline = [['$match' => ['_id' => ['$ne' => 2]]]];
-
-        $operation = new Aggregate($this->getDatabaseName(), $this->getCollectionName(), $pipeline, ['typeMap' => $typeMap, 'useCursor' => false]);
-        $results = $operation->execute($this->getPrimaryServer());
-
-        $this->assertInstanceOf(ArrayIterator::class, $results);
-        $this->assertEquals($expectedDocuments, iterator_to_array($results));
     }
 
     public function testExplainOption(): void
@@ -204,10 +192,6 @@ class AggregateFunctionalTest extends FunctionalTestCase
 
     public function testExplainOptionWithWriteConcern(): void
     {
-        if (version_compare($this->getServerVersion(), '3.4.0', '<')) {
-            $this->markTestSkipped('The writeConcern option is not supported');
-        }
-
         $this->createFixtures(3);
 
         $pipeline = [['$match' => ['_id' => ['$ne' => 2]]], ['$out' => $this->getCollectionName() . '.output']];
@@ -240,10 +224,6 @@ class AggregateFunctionalTest extends FunctionalTestCase
 
     public function testBypassDocumentValidationSetWhenTrue(): void
     {
-        if (version_compare($this->getServerVersion(), '3.2.0', '<')) {
-            $this->markTestSkipped('bypassDocumentValidation is not supported');
-        }
-
         (new CommandObserver())->observe(
             function (): void {
                 $operation = new Aggregate(
@@ -264,10 +244,6 @@ class AggregateFunctionalTest extends FunctionalTestCase
 
     public function testBypassDocumentValidationUnsetWhenFalse(): void
     {
-        if (version_compare($this->getServerVersion(), '3.2.0', '<')) {
-            $this->markTestSkipped('bypassDocumentValidation is not supported');
-        }
-
         (new CommandObserver())->observe(
             function (): void {
                 $operation = new Aggregate(

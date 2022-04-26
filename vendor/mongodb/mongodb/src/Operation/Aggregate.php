@@ -40,7 +40,6 @@ use function is_object;
 use function is_string;
 use function MongoDB\create_field_path_type_map;
 use function MongoDB\is_last_pipeline_operator_write;
-use function MongoDB\server_supports_feature;
 use function sprintf;
 
 /**
@@ -52,18 +51,6 @@ use function sprintf;
  */
 class Aggregate implements Executable, Explainable
 {
-    /** @var integer */
-    private static $wireVersionForCollation = 5;
-
-    /** @var integer */
-    private static $wireVersionForDocumentLevelValidation = 4;
-
-    /** @var integer */
-    private static $wireVersionForReadConcern = 4;
-
-    /** @var integer */
-    private static $wireVersionForWriteConcern = 5;
-
     /** @var string */
     private $databaseName;
 
@@ -89,7 +76,7 @@ class Aggregate implements Executable, Explainable
      *
      *  * allowDiskUse (boolean): Enables writing to temporary files. When set
      *    to true, aggregation stages can write data to the _tmp sub-directory
-     *    in the dbPath directory. The default is false.
+     *    in the dbPath directory.
      *
      *  * batchSize (integer): The number of documents to return per batch.
      *
@@ -97,13 +84,7 @@ class Aggregate implements Executable, Explainable
      *    circumvent document level validation. This only applies when an $out
      *    or $merge stage is specified.
      *
-     *    For servers < 3.2, this option is ignored as document level validation
-     *    is not available.
-     *
      *  * collation (document): Collation specification.
-     *
-     *    This is not supported for server versions < 3.4 and will result in an
-     *    exception at execution time if used.
      *
      *  * comment (string): An arbitrary string to help trace the operation
      *    through the database profiler, currentOp, and logs.
@@ -128,16 +109,11 @@ class Aggregate implements Executable, Explainable
      *
      *  * readConcern (MongoDB\Driver\ReadConcern): Read concern.
      *
-     *    This is not supported for server versions < 3.2 and will result in an
-     *    exception at execution time if used.
-     *
      *  * readPreference (MongoDB\Driver\ReadPreference): Read preference.
      *
      *    This option is ignored if an $out or $merge stage is specified.
      *
      *  * session (MongoDB\Driver\Session): Client session.
-     *
-     *    Sessions are not supported for server versions < 3.6.
      *
      *  * typeMap (array): Type map for BSON deserialization. This will be
      *    applied to the returned Cursor (it is not sent to the server).
@@ -150,9 +126,6 @@ class Aggregate implements Executable, Explainable
      *
      *  * writeConcern (MongoDB\Driver\WriteConcern): Write concern. This only
      *    applies when an $out or $merge stage is specified.
-     *
-     *    This is not supported for server versions < 3.4 and will result in an
-     *    exception at execution time if used.
      *
      * Note: Collection-agnostic commands (e.g. $currentOp) may be executed by
      * specifying null for the collection name.
@@ -179,12 +152,9 @@ class Aggregate implements Executable, Explainable
             $expectedIndex += 1;
         }
 
-        $options += [
-            'allowDiskUse' => false,
-            'useCursor' => true,
-        ];
+        $options += ['useCursor' => true];
 
-        if (! is_bool($options['allowDiskUse'])) {
+        if (isset($options['allowDiskUse']) && ! is_bool($options['allowDiskUse'])) {
             throw InvalidArgumentException::invalidType('"allowDiskUse" option', $options['allowDiskUse'], 'boolean');
         }
 
@@ -252,6 +222,10 @@ class Aggregate implements Executable, Explainable
             throw new InvalidArgumentException('"batchSize" option should not be used if "useCursor" is false');
         }
 
+        if (isset($options['bypassDocumentValidation']) && ! $options['bypassDocumentValidation']) {
+            unset($options['bypassDocumentValidation']);
+        }
+
         if (isset($options['readConcern']) && $options['readConcern']->isDefault()) {
             unset($options['readConcern']);
         }
@@ -288,23 +262,11 @@ class Aggregate implements Executable, Explainable
      * @param Server $server
      * @return Traversable
      * @throws UnexpectedValueException if the command response was malformed
-     * @throws UnsupportedException if collation, read concern, or write concern is used and unsupported
+     * @throws UnsupportedException if read concern or write concern is used and unsupported
      * @throws DriverRuntimeException for other driver errors (e.g. connection errors)
      */
     public function execute(Server $server)
     {
-        if (isset($this->options['collation']) && ! server_supports_feature($server, self::$wireVersionForCollation)) {
-            throw UnsupportedException::collationNotSupported();
-        }
-
-        if (isset($this->options['readConcern']) && ! server_supports_feature($server, self::$wireVersionForReadConcern)) {
-            throw UnsupportedException::readConcernNotSupported();
-        }
-
-        if (isset($this->options['writeConcern']) && ! server_supports_feature($server, self::$wireVersionForWriteConcern)) {
-            throw UnsupportedException::writeConcernNotSupported();
-        }
-
         $inTransaction = isset($this->options['session']) && $this->options['session']->isInTransaction();
         if ($inTransaction) {
             if (isset($this->options['readConcern'])) {
@@ -317,7 +279,7 @@ class Aggregate implements Executable, Explainable
         }
 
         $command = new Command(
-            $this->createCommandDocument($server),
+            $this->createCommandDocument(),
             $this->createCommandOptions()
         );
 
@@ -353,26 +315,22 @@ class Aggregate implements Executable, Explainable
      */
     public function getCommandDocument(Server $server)
     {
-        return $this->createCommandDocument($server);
+        return $this->createCommandDocument();
     }
 
-    private function createCommandDocument(Server $server): array
+    /**
+     * Create the aggregate command document.
+     *
+     * @return array
+     */
+    private function createCommandDocument()
     {
         $cmd = [
             'aggregate' => $this->collectionName ?? 1,
             'pipeline' => $this->pipeline,
         ];
 
-        $cmd['allowDiskUse'] = $this->options['allowDiskUse'];
-
-        if (
-            ! empty($this->options['bypassDocumentValidation']) &&
-            server_supports_feature($server, self::$wireVersionForDocumentLevelValidation)
-        ) {
-            $cmd['bypassDocumentValidation'] = $this->options['bypassDocumentValidation'];
-        }
-
-        foreach (['comment', 'explain', 'maxTimeMS'] as $option) {
+        foreach (['allowDiskUse', 'bypassDocumentValidation', 'comment', 'explain', 'maxTimeMS'] as $option) {
             if (isset($this->options[$option])) {
                 $cmd[$option] = $this->options[$option];
             }
